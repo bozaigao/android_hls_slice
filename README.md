@@ -1,0 +1,2 @@
+# android_hls_slice
+移植ffmpeg到Android平台并对本地视频文件和摄像头实时视频流文件进行ts切片并生成m3u8
