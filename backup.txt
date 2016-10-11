@@ -1,0 +1,152 @@
+/**
+     * 切片函数 add by 波仔糕 on 2016/9/1
+     */
+    private void slice_up(int SEGMENT_DURATION) throws FrameRecorder.Exception {
+        //初始化分流配置
+        //init_demux();
+        //填写第一个输出文件名称
+        m_output_file_name = new BytePointer(URL_PREFIX + OUTPUT_PREFIX + "-" + m_output_index + ".ts");
+        m_output_index++;
+        //****************************************创建输出文件（写头部）
+        init_mux();
+        write_flag = !write_index_file(first_segment, last_segment, false, actual_segment_durations, SEGMENT_DURATION);
+
+        do {
+            int current_segment_duration;
+            double segment_time = prev_segment_time;
+            avcodec.AVPacket packet = new avcodec.AVPacket();
+            avcodec.av_init_packet(packet);
+            //实时流
+            decode_done = avformat.av_read_frame(this.oc, packet);
+
+            if (decode_done < 0) {
+                break;
+            }
+
+            if (avcodec.av_dup_packet(packet) < 0) {
+                Log.e(TAG, "Could not duplicate packet");
+                avcodec.av_free_packet(packet);
+                break;
+            }
+
+            if (packet.stream_index() == video_stream_idx) {
+                segment_time = packet.pts() * avutil.av_q2d(this.oc.streams(video_stream_idx).time_base());
+            } else if (video_stream_idx < 0) {
+                segment_time = packet.pts() * avutil.av_q2d(this.oc.streams(audio_stream_idx).time_base());
+            } else {
+                segment_time = prev_segment_time;
+            }
+
+            //这里是为了纠错，有文件pts为不可用值
+            if (packet.pts() < packet.dts()) {
+                packet.pts(packet.dts());
+            }
+
+            //视频
+            if (packet.stream_index() == video_stream_idx) {
+
+                packet.pts(avutil.av_rescale_q_rnd(packet.pts(), this.oc.streams(video_stream_idx)
+                        .time_base(), ovideo_st.time_base(), avutil.AV_ROUND_NEAR_INF));
+                packet.dts(avutil.av_rescale_q_rnd(packet.dts(), this.oc.streams(video_stream_idx)
+                        .time_base(), ovideo_st.time_base(), avutil.AV_ROUND_NEAR_INF));
+                //数据大于2147483647可能会存在截断误差，不过已经足够
+                packet.duration((int) avutil.av_rescale_q(packet.duration(), this.oc.streams(video_stream_idx)
+                        .time_base(), ovideo_st.time_base()));
+
+                packet.stream_index(VIDEO_ID); //这里add_out_stream顺序有影响
+                Log.e(TAG, "video\n");
+            }//音频
+            else if (packet.stream_index() == audio_stream_idx) {
+                packet.pts(avutil.av_rescale_q_rnd(packet.pts(), this.oc.streams(audio_stream_idx)
+                        .time_base(), oaudio_st.time_base(), avutil.AV_ROUND_NEAR_INF));
+                packet.dts(avutil.av_rescale_q_rnd(packet.dts(), this.oc.streams(audio_stream_idx)
+                        .time_base(), oaudio_st.time_base(), avutil.AV_ROUND_NEAR_INF));
+                //数据大于2147483647可能会存在截断误差，不过已经足够
+                packet.duration((int) avutil.av_rescale_q(packet.duration(), this.oc.streams(audio_stream_idx)
+                        .time_base(), oaudio_st.time_base()));
+
+                packet.stream_index(AUDIO_ID); //这里add_out_stream顺序有影响
+                Log.e(TAG, "audio\n");
+            }
+
+            current_segment_duration = (int) (segment_time - prev_segment_time + 0.5);
+            actual_segment_durations[last_segment] = (current_segment_duration > 0 ? current_segment_duration : 1);
+
+            if (segment_time - prev_segment_time >= SEGMENT_DURATION) {
+                ret = avformat.av_write_trailer(ocodec);   // close ts file and free memory
+                if (ret < 0) {
+                    Log.e(TAG, "Warning: Could not av_write_trailer of stream\n");
+                }
+
+                avformat.avio_flush(ocodec.pb());
+                avformat.avio_close(ocodec.pb());
+
+                if (NUM_SEGMENTS != 0 && (last_segment - first_segment) >= NUM_SEGMENTS - 1) {
+                    remove_file = 1;
+                    first_segment++;
+                } else {
+                    remove_file = 0;
+                }
+
+                if (write_flag) {
+                    write_flag = !write_index_file(first_segment, ++last_segment, false, actual_segment_durations, SEGMENT_DURATION);
+                }
+
+                if (remove_file != 0) {
+                    File file = new File(remove_filename);
+                    if (file.isFile() && file.exists())
+                        file.delete();
+                }
+                //每一个ts切片的名字
+                m_output_file_name = new BytePointer(URL_PREFIX + OUTPUT_PREFIX + "-" + m_output_index + ".ts");
+                m_output_index++;
+                avformat.AVIOContext pb = new avformat.AVIOContext(null);
+                if (avformat.avio_open(pb, m_output_file_name, avformat.AVIO_FLAG_WRITE) < 0) {
+                    Log.e(TAG, "Could not open" + m_output_file_name);
+                    break;
+                }
+                ocodec.pb(pb);
+
+                // Write a new header at the start of each file
+                if (avformat.avformat_write_header(ocodec, (PointerPointer) null) != 0) {
+                    Log.e(TAG, "Could not write mpegts header to first output file\n");
+                    System.exit(1);
+                }
+
+                prev_segment_time = segment_time;
+            }
+
+            ret = avformat.av_interleaved_write_frame(ocodec, packet);
+            if (ret < 0) {
+                Log.e(TAG, "Warning: Could not write frame of stream\n");
+            } else if (ret > 0) {
+                Log.e(TAG, "End of stream requested\n");
+                avcodec.av_free_packet(packet);
+                break;
+            }
+
+            avcodec.av_free_packet(packet);
+        } while (decode_done == 0);
+
+        //****************************************完成输出文件（写尾部）
+        uinit_mux();
+
+        if (NUM_SEGMENTS != 0 && (last_segment - first_segment) >= NUM_SEGMENTS - 1) {
+            remove_file = 1;
+            first_segment++;
+        } else {
+            remove_file = 0;
+        }
+
+        if (write_flag) {
+            write_index_file(first_segment, ++last_segment, true, actual_segment_durations, SEGMENT_DURATION);
+        }
+
+        if (remove_file != 0) {
+            File file = new File(remove_filename);
+            if (file.isFile() && file.exists())
+                file.delete();
+        }
+
+        return;
+    }
