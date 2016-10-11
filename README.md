@@ -1,4 +1,4 @@
-# FFmpegRecorder
+# MobiCafe
 ![Screenshot](https://github.com/bozaigao/android_hls_slice/blob/master/screenshots/1.jpg)
 ![Screenshot](https://github.com/bozaigao/android_hls_slice/blob/master/screenshots/2.jpg)
 ![Screenshot](https://github.com/bozaigao/android_hls_slice/blob/master/screenshots/3.jpg)
@@ -21,7 +21,7 @@ These core features use FFmpegFrameRecorder, FFmpegFrameFilter from [JavaCV][1].
 
 ## License
 
-    Copyright 2016 Lei Wang
+    Copyright 2016 He Yanbo
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
